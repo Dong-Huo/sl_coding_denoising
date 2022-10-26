@@ -41,20 +41,22 @@ class Training_dataset(data.Dataset):
         # else:
         #     top_corr, top_idx, disp = noisy_synthesize(img_path, self.pattern_uncode_all, top_k=self.top_k)
 
-        cam_imgs, disp = noisy_synthesize(img_path, self.pattern_golay_all, top_k=self.top_k)
+        projector_light = 10 ** np.random.uniform(np.log10(0.3), np.log10(0.8))
+        poiss_K = 10 ** np.random.uniform(np.log10(2.0), np.log10(6.0))
+        cam_imgs, disp = noisy_synthesize(img_path, self.pattern_golay_all, pr=projector_light, poiss_K=poiss_K)
 
         h_start, w_start = self.random_crop(cam_imgs, self.patch_size)
 
         top_corr, top_idx, disp = get_patch_corr(self.pattern_golay_all, cam_imgs, disp, self.top_k, crop=True,
                                                  start_h=h_start, start_w=w_start, patch_size=self.patch_size)
 
-        return ToTensor(top_corr), ToTensor(top_idx / 100), ToTensor(disp / 100)
+        return top_corr.permute(2, 0, 1), top_idx.permute(2, 0, 1) / 100, disp.permute(2, 0, 1) / 100
 
     def __len__(self):
         return len(self.image_path_list)
 
     def random_crop(self, top_corr, size):
-        h, w, c = top_corr.shape
+        c, _, h, w = top_corr.shape
 
         h_start = np.random.randint(0, h - size)
         w_start = np.random.randint(0, w - size - 100)
@@ -74,11 +76,11 @@ class Testing_dataset(data.Dataset):
     def __getitem__(self, idx):
         img_path = self.image_path_list[idx]
 
-        cam_imgs, disp = noisy_synthesize(img_path, self.pattern_golay_all, top_k=self.top_k)
+        cam_imgs, disp = noisy_synthesize(img_path, self.pattern_golay_all)
 
         top_corr, top_idx, disp = get_patch_corr(self.pattern_golay_all, cam_imgs, disp, self.top_k)
 
-        return ToTensor(top_corr), ToTensor(top_idx / 100), ToTensor(disp / 100), img_path
+        return top_corr.permute(2, 0, 1), top_idx.permute(2, 0, 1) / 100, disp.permute(2, 0, 1) / 100, img_path
 
     def __len__(self):
         return len(self.image_path_list)

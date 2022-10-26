@@ -37,8 +37,8 @@ def disp_warp(x, dispx, dispy, interp_mode='bilinear', padding_mode='zeros'):
 def sl_simu(pattern_all, intensity, disp, pr, sr, poiss_K, noise_level, t_exp):
     cam_imgs = []
     t_calib = 3 / 4 / (pr + sr)
-    assert (pr + sr) * t_exp / (pattern_all.shape[2] - 2) <= 3 / 4
-    assert (pr + sr) * t_calib <= 3 / 4
+    # assert (pr + sr) * t_exp / (pattern_all.shape[2] - 2) <= 3 / 4
+    # assert (pr + sr) * t_calib <= 3 / 4
     ## make sure no saturation
 
     for ii in range(pattern_all.shape[2]):
@@ -65,6 +65,53 @@ def sl_simu(pattern_all, intensity, disp, pr, sr, poiss_K, noise_level, t_exp):
     return cam_imgs
 
 
+def disp_warp_batch(x, dispx, dispy, interp_mode='bilinear', padding_mode='zeros'):
+    x = torch.from_numpy(x.transpose(2, 0, 1)).unsqueeze(1).float().cuda()
+    B, C, H, W = x.size()
+    disp = torch.cat((torch.from_numpy(np.repeat(dispx[np.newaxis, ...], B, axis=0)).unsqueeze(3),
+                      torch.from_numpy(np.repeat(dispy[np.newaxis, ...], B, axis=0)).unsqueeze(3)),
+                     dim=3).float().cuda()
+
+    assert x.size()[-2:] == disp.size()[1:3]
+    # mesh grid
+    grid_y, grid_x = torch.meshgrid(torch.arange(0, H), torch.arange(0, W))
+    grid = torch.stack((grid_x, grid_y), 2).float()  # W(x), H(y), 2
+    grid.requires_grad = False
+    grid = grid.type_as(x)
+    vgrid = grid + disp
+    # scale grid to [-1,1]
+    vgrid_x = 2.0 * vgrid[:, :, :, 0] / max(W, 1) - 1.0
+    vgrid_y = 2.0 * vgrid[:, :, :, 1] / max(H, 1) - 1.0
+    vgrid_scaled = torch.stack((vgrid_x, vgrid_y), dim=3)
+    # pdb.set_trace()
+    output = F.grid_sample(x, vgrid_scaled, mode=interp_mode, padding_mode=padding_mode)
+    return output
+
+
+def sl_simu_batch(pattern_all, intensity, disp, pr, sr, poiss_K, noise_level, t_exp):
+    t_calib = 3 / 4 / (pr + sr)
+    assert (pr + sr) * t_exp / (pattern_all.shape[2] - 2) <= 3 / 4
+    # assert (pr + sr) * t_calib <= 3 / 4
+    ## make sure no saturation
+    proj_imgs = intensity[..., np.newaxis] * (pattern_all * pr + sr)
+    proj_imgs[..., 1:-1] *= t_exp / (pattern_all.shape[2] - 2)
+    proj_imgs[..., 0] *= t_calib
+    proj_imgs[..., -1] *= t_calib
+    cam_imgs = disp_warp_batch(proj_imgs.astype(np.float32), -disp.astype(np.float32) + 0.5,
+                               0.5 * np.ones_like(disp).astype(np.float32))
+
+    sigma_maps = torch.sqrt(cam_imgs * poiss_K / 4096 + noise_level ** 2).cuda()
+    cam_imgs += sigma_maps * torch.randn_like(cam_imgs)
+    cam_imgs = torch.clip(cam_imgs, 0.0, 1.0)
+    cam_imgs = torch.round(cam_imgs * 4096).float() / 4096
+    cam_imgs[0] *= t_exp / (pattern_all.shape[2] - 2) / t_calib
+    cam_imgs[-1] *= t_exp / (pattern_all.shape[2] - 2) / t_calib
+    cam_imgs = torch.clip((cam_imgs - cam_imgs[:1]) / (cam_imgs[-1:] - cam_imgs[:1] + 1e-9), -1.0, 1.0)
+    cam_imgs[..., :100] = -100
+
+    return cam_imgs
+
+
 """
 fast pytorch implementation of cost volume
 """
@@ -74,72 +121,6 @@ fast pytorch implementation of cost volume
 #     corr = code1d_bias - 2 * torch.matmul(code1d, cam_imgs)
 #     corr_idx = torch.argmin(corr, dim=0).cpu().numpy().reshape(resx, resy)
 #     return corr_idx
-
-
-# def fast_sl_rec(code1d, code1d_bias, cam_imgs):
-#     corr = code1d_bias - 2 * torch.matmul(code1d, cam_imgs)
-#     corr = corr.reshape((-1, resx, resy)).permute(1, 2, 0).cpu().numpy().copy("C")
-#
-#     unaries = (corr * 100).astype(np.int32)
-#
-#     n_disps = corr.shape[2]
-#     x, y = np.ogrid[:n_disps, :n_disps]
-#     one_d_topology = np.abs(x - y)
-#     one_d_topology = one_d_topology.astype(np.int32).copy("C")
-#
-#     corr_idx = cut_simple(unaries, one_d_topology)
-#
-#     # corr_idx = torch.argmin(corr, dim=0).cpu().numpy().reshape(resx, resy)
-#     return corr_idx
-
-
-# def fast_sl_rec(code1d, code1d_bias, cam_imgs):
-#     corr = code1d_bias - 2 * torch.matmul(code1d, cam_imgs)
-#     corr = corr.reshape((-1, resx, resy)).permute(1, 2, 0)
-#
-#     value, idx = torch.topk(corr, k=10, dim=-1, largest=True, sorted=True)
-#
-#     corr = corr.cpu().numpy().copy("C")
-#
-#     unaries = (value.cpu().numpy().copy("C") * 100).astype(np.int32)
-#
-#     n_disps = 10
-#     x, y = np.ogrid[:n_disps, :n_disps]
-#     one_d_topology = np.abs(x - y).astype(np.int32).copy("C")
-#
-#     corr_idx = cut_simple(unaries, 5 * one_d_topology)
-#
-#     corr_idx = corr_idx[idx]
-#
-#     # corr_idx = cut_simple(unaries,  -5 * np.eye(n_disps, dtype=np.int32))
-#
-#     # corr_idx = torch.argmin(corr, dim=0).cpu().numpy().reshape(resx, resy)
-#     return corr_idx
-
-
-# def fast_sl_rec(code1d, code1d_bias, cam_imgs, resx, resy):
-#     corr = code1d_bias - 2 * torch.matmul(code1d, cam_imgs)
-#     corr_idx = torch.argmin(corr, dim=0).cpu().numpy().reshape(resx, resy)
-#     return corr_idx
-#
-#
-# def get_code_all(code, resy):
-#     code = code.transpose()[:resy]
-#     code_all = np.zeros((code.shape[0], code.shape[1] + 2))
-#     code_all[:, 0] = np.zeros_like(code[..., 0])
-#     code_all[:, -1] = np.ones_like(code[..., 0])
-#     code_all[:, 1:-1] = code
-#     return code_all
-
-
-# def get_corr(code1d, code1d_bias, cam_imgs, resx, resy, top_k):
-#     corr = code1d_bias - 2 * torch.matmul(code1d, cam_imgs)
-#     # corr_idx = torch.argmin(corr, dim=0).cpu().numpy().reshape(resx, resy)
-#     corr = corr.reshape((-1, resx, resy)).permute(1, 2, 0)
-#
-#     top_corr, top_idx = torch.topk(corr, k=top_k, dim=-1, largest=False, sorted=True)
-#
-#     return top_corr.cpu().numpy(), top_idx.cpu().numpy()
 
 
 def load_code():
@@ -165,7 +146,7 @@ def load_code():
 
 
 def noisy_synthesize(left_path, pattern, noise_level=0.001, t_exp=1.0, pr=1.0, sr=2.0,
-                     poiss_K=6.0, resx=540, resy=729, top_k=10):
+                     poiss_K=6.0, resx=540, resy=729):
     # disp_file = '/media/data1/szh/FT3D/disparity/TRAIN/A/0743/left/0013.pfm'
     disp_file = left_path.replace("frames_cleanpass", "disparity").replace("png", "pfm")
     disp, _ = readPFM(disp_file)
@@ -184,51 +165,56 @@ def noisy_synthesize(left_path, pattern, noise_level=0.001, t_exp=1.0, pr=1.0, s
     intensity = (intensity + 1.0) / 2.0
     intensity = intensity[:, :resy]
 
-    cam_imgs = sl_simu(pattern, intensity, disp, pr, sr, poiss_K, noise_level, t_exp)
+    # cam_imgs = sl_simu(pattern, intensity, disp, pr, sr, poiss_K, noise_level, t_exp)
+    cam_imgs = sl_simu_batch(pattern, intensity, disp, pr, sr, poiss_K, noise_level, t_exp)
 
     return cam_imgs, disp
 
 
 def get_patch_corr(pattern, cam_imgs, disp, top_k, crop=False, start_h=0, start_w=0, patch_size=256):
+    cam_imgs = cam_imgs.squeeze().permute(1, 2, 0)
+
     resx, resy, c = cam_imgs.shape
 
     codes = pattern[0]
 
-    code1d = codes.astype(np.float32)
-    code1d_bias = np.sum(code1d ** 2, axis=1).reshape((-1, 1))
+    code1d = torch.from_numpy(codes.astype(np.float32)).cuda()
+    code1d_bias = torch.sum(code1d ** 2, dim=1).reshape(-1, 1)
 
-    x, y = np.meshgrid(np.arange(disp.shape[1]), np.arange(disp.shape[0]))
+    # x_np, y_np = np.meshgrid(np.arange(disp.shape[1]), np.arange(disp.shape[0]))
+
+    y, x = torch.meshgrid(torch.arange(disp.shape[0]), torch.arange(disp.shape[1]))
+    x = x[..., None].repeat(1, 1, top_k).cuda()
 
     if crop:
-        cam_imgs = cam_imgs[start_h:start_h + patch_size, start_w + 100:start_w + patch_size + 100, :].reshape(
-            (-1, c)).transpose((1, 0))
+        cam_imgs = cam_imgs[start_h:start_h + patch_size,
+                   start_w + 100:start_w + patch_size + 100, :].reshape(-1, c).permute(1, 0)
 
-        corr = code1d_bias - 2 * np.matmul(code1d, cam_imgs)
-        corr = corr.reshape((-1, patch_size, patch_size)).transpose((1, 2, 0))
-        top_corr, top_idx = torch.topk(torch.from_numpy(corr), k=top_k, dim=-1, largest=False, sorted=True)
+        corr = code1d_bias - 2 * torch.matmul(code1d, cam_imgs)
+        corr = corr.reshape(-1, patch_size, patch_size).permute(1, 2, 0)
+        top_corr, top_idx = torch.topk(corr, k=top_k, dim=-1, largest=False, sorted=True)
 
-        top_corr = top_corr.numpy()
-        top_idx = top_idx.numpy()
+        # top_corr = top_corr.numpy()
+        # top_idx = top_idx.numpy()
 
-        top_disp = np.clip(
-            np.repeat(x[start_h:start_h + patch_size, start_w + 100:start_w + patch_size + 100, np.newaxis], top_k,
-                      axis=-1) - top_idx, 0.0, 99.0)
+        top_disp = torch.clamp(
+            x[start_h:start_h + patch_size, start_w + 100:start_w + patch_size + 100, :] - top_idx, 0.0, 99.0)
 
         disp = disp[start_h:start_h + patch_size, start_w + 100:start_w + patch_size + 100]
 
-        # cam_imgs = cam_imgs.transpose((1, 0)).reshape((patch_size, patch_size, c))
+        # cam_imgs = cam_imgs.permute(1, 0).reshape(patch_size, patch_size, c).cpu().numpy()
 
     else:
 
-        cam_imgs = cam_imgs.reshape((-1, c)).transpose((1, 0))
-        corr = code1d_bias - 2 * np.matmul(code1d, cam_imgs)
-        corr = corr.reshape((-1, resx, resy)).transpose((1, 2, 0))
-        top_corr, top_idx = torch.topk(torch.from_numpy(corr), k=top_k, dim=-1, largest=False, sorted=True)
+        cam_imgs = cam_imgs.reshape(-1, c).permute(1, 0)
+        corr = code1d_bias - 2 * torch.matmul(code1d, cam_imgs)
+        corr = corr.reshape(-1, resx, resy).permute((1, 2, 0))
+        top_corr, top_idx = torch.topk(corr, k=top_k, dim=-1, largest=False, sorted=True)
 
-        top_corr = top_corr.numpy()
-        top_idx = top_idx.numpy()
+        # top_corr = top_corr.numpy()
+        # top_idx = top_idx.numpy()
 
-        top_disp = np.clip(np.repeat(x[:, 100:, np.newaxis], top_k, axis=-1) - top_idx[:, 100:, :], 0.0, 99.0)
+        top_disp = torch.clamp(x[:, 100:, :] - top_idx[:, 100:, :], 0.0, 99.0)
 
         # noisy_disp = np.clip(x[:, 100:] - corr_idx[:, 100:], 0.0, 99.0)
 
@@ -241,10 +227,10 @@ def get_patch_corr(pattern, cam_imgs, disp, top_k, crop=False, start_h=0, start_
         disp = disp[:, 100:]
         top_corr = top_corr[:, 100:]
 
-        # cam_imgs = cam_imgs.transpose((1, 0)).reshape((resx, resy, c))
+        # cam_imgs = cam_imgs.permute(1, 0).reshape(resx, resy, c).cpu().numpy()
 
     # fig, ax = plt.subplots(1, 3, figsize=(10, 5))
-    # ax[0].imshow(top_disp[..., 0], vmin=0.0, vmax=100.0)
+    # ax[0].imshow(top_disp.cpu().numpy()[..., 0], vmin=0.0, vmax=100.0)
     # ax[1].imshow(cam_imgs[:, :, 3], vmin=0.0, vmax=1.0, cmap='gray')
     # ax[2].imshow(disp, vmin=0.0, vmax=100.0)
     # # ax[2].imshow(disp, vmin=0.0, vmax=100.0)
@@ -253,4 +239,4 @@ def get_patch_corr(pattern, cam_imgs, disp, top_k, crop=False, start_h=0, start_
     # # print("--- %s seconds ---" % (time.time() - start_time))
     # plt.show()
 
-    return top_corr, top_disp, disp[..., np.newaxis]
+    return top_corr, top_disp, torch.from_numpy(disp[..., np.newaxis]).cuda()

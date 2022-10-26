@@ -28,15 +28,13 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module, lr_sched
     iter_num = math.ceil(len(data_loader.dataset) / batch_size)
 
     for iteration, (top_corr, top_disp, disp) in enumerate(data_loader):
-        top_corr = top_corr.to(device)
-        top_disp = top_disp.to(device)
-        disp = disp.to(device)
+        top_corr = top_corr.detach().to(device)
+        top_disp = top_disp.detach().to(device)
+        disp = disp.detach().to(device)
 
         pred_disp = model(top_disp)
 
         loss = criterion(pred_disp, disp)
-
-
 
         optimizer.zero_grad()
         # with torch.autograd.detect_anomaly():
@@ -82,6 +80,16 @@ def evaluate(model, data_loader, device, result_dir):
                 np.int32(pred_disp * 100))
 
         plt.imsave(os.path.join(result_dir, image_folder, image_idx, "left", image_name), np.int32(pred_disp * 100))
+
+        fig, ax = plt.subplots(1, 3, figsize=(10, 5))
+        ax[0].imshow(np.int32(top_disp[0, 0, :, :].squeeze().cpu().numpy() * 100), vmin=0.0, vmax=100.0)
+        ax[1].imshow(np.int32(pred_disp * 100), vmin=0.0, vmax=100.0)
+        ax[2].imshow(np.int32(disp * 100), vmin=0.0, vmax=100.0)
+        # ax[2].imshow(disp, vmin=0.0, vmax=100.0)
+        # print('Error rate: ', np.sum(np.abs(x[:, 100:] - corr_idx[:, 100:] - \
+        #                                     disp[:, 100:]) >= 2.0) / disp[:, 100:].shape[0] / disp[:, 100:].shape[1])
+        # print("--- %s seconds ---" % (time.time() - start_time))
+        plt.show()
 
         print("error:{}".format(error))
 

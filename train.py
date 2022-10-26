@@ -28,8 +28,8 @@ import utils.misc as utils
 def get_args_parser():
     parser = argparse.ArgumentParser('Set args', add_help=False)
     parser.add_argument('--lr', default=1e-4, type=float)
-    parser.add_argument('--batch_size', default=16, type=int)
-    parser.add_argument('--patch_size', default=256, type=int)
+    parser.add_argument('--batch_size', default=4, type=int)
+    parser.add_argument('--patch_size', default=128, type=int)
     parser.add_argument('--top_k', default=10, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=300, type=int)
@@ -56,11 +56,11 @@ def get_args_parser():
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
 
-    # parser.add_argument('--resume', default='checkpoints/checkpoint0000.pth', help='resume from checkpoint')
-    # parser.add_argument('--eval', default=True, action='store_true')
+    parser.add_argument('--resume', default='checkpoints/checkpoint.pth', help='resume from checkpoint')
+    parser.add_argument('--eval', default=True, action='store_true')
 
-    parser.add_argument('--resume', help='resume from checkpoint')
-    parser.add_argument('--eval', action='store_true')
+    # parser.add_argument('--resume', help='resume from checkpoint')
+    # parser.add_argument('--eval', action='store_true')
 
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
@@ -83,7 +83,7 @@ def main(args):
     np.random.seed(seed)
     random.seed(seed)
 
-    # torch.multiprocessing.set_start_method('spawn')
+    torch.multiprocessing.set_start_method('spawn')
 
     dataset_train = Training_dataset(img_folder=os.path.join(args.dataset_path, "TRAIN"),
                                      patch_size=args.patch_size, top_k=args.top_k)
@@ -93,7 +93,7 @@ def main(args):
                                    num_workers=args.num_workers,
                                    batch_size=args.batch_size,
                                    shuffle=True,
-                                   pin_memory=True)
+                                   pin_memory=False)
 
     val_loader = DataLoader(dataset=dataset_val,
                             num_workers=1,
@@ -145,7 +145,7 @@ def main(args):
         train_one_epoch(model, criterion, lr_scheduler, train_data_loader, optimizer, device, epoch, writer,
                         args.batch_size)
 
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % 1 == 0:
             mean_error = evaluate(model, val_loader, device, args.result_dir)
 
             writer.add_scalar('testing/mean_error', mean_error, epoch)
