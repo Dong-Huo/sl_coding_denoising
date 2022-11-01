@@ -50,6 +50,14 @@ class Training_dataset(data.Dataset):
         top_corr, top_idx, disp = get_patch_corr(self.pattern_golay_all, cam_imgs, disp, self.top_k, crop=True,
                                                  start_h=h_start, start_w=w_start, patch_size=self.patch_size)
 
+        # # sorter = torch.argsort(top_idx, -1)
+        #
+        # index = torch.searchsorted(torch.flip(top_idx, [-1]), disp, right=True)
+        #
+        # a = torch.from_numpy(np.array([1, 2, 3, 4]))
+        #
+        # index = torch.searchsorted(a, torch.from_numpy(np.array([1])), right=False)
+
         return top_corr.permute(2, 0, 1), top_idx.permute(2, 0, 1) / 100, disp.permute(2, 0, 1) / 100
 
     def __len__(self):

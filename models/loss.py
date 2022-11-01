@@ -16,7 +16,7 @@ class pred_loss(nn.Module):
 
     def forward(self, pred_disp, disp):
 
-        loss = torch.mean(torch.square(pred_disp - disp))
+        loss = torch.mean(torch.abs(pred_disp - disp))
 
         # print("loss:{}".format(str(round(loss.item(), 10))))
 

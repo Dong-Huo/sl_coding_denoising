@@ -56,11 +56,11 @@ def get_args_parser():
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
 
-    parser.add_argument('--resume', default='checkpoints/checkpoint.pth', help='resume from checkpoint')
-    parser.add_argument('--eval', default=True, action='store_true')
+    # parser.add_argument('--resume', default='checkpoints/checkpoint.pth', help='resume from checkpoint')
+    # parser.add_argument('--eval', default=True, action='store_true')
 
-    # parser.add_argument('--resume', help='resume from checkpoint')
-    # parser.add_argument('--eval', action='store_true')
+    parser.add_argument('--resume', help='resume from checkpoint')
+    parser.add_argument('--eval', action='store_true')
 
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')

@@ -32,7 +32,14 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module, lr_sched
         top_disp = top_disp.detach().to(device)
         disp = disp.detach().to(device)
 
-        pred_disp = model(top_disp)
+        top_corr = -top_corr
+
+        corr_max, _ = torch.max(top_corr, dim=1, keepdim=True)
+        corr_min, _ = torch.min(top_corr, dim=1, keepdim=True)
+
+        top_corr = (top_corr - corr_min) / (corr_max - corr_min + 1e-16)
+
+        pred_disp = model(torch.cat([top_disp, top_corr], 1))
 
         loss = criterion(pred_disp, disp)
 
@@ -66,7 +73,14 @@ def evaluate(model, data_loader, device, result_dir):
         top_disp = top_disp.to(device)
         disp = disp.squeeze().cpu().numpy()
 
-        pred_disp = model(top_disp).squeeze().cpu().numpy()
+        top_corr = -top_corr
+
+        corr_max, _ = torch.max(top_corr, dim=1, keepdim=True)
+        corr_min, _ = torch.min(top_corr, dim=1, keepdim=True)
+
+        top_corr = (top_corr - corr_min) / (corr_max - corr_min + 1e-16)
+
+        pred_disp = model(torch.cat([top_disp, top_corr], 1)).squeeze().cpu().numpy()
 
         error = calculate_error(pred_disp * 100, disp * 100)
 
@@ -81,15 +95,15 @@ def evaluate(model, data_loader, device, result_dir):
 
         plt.imsave(os.path.join(result_dir, image_folder, image_idx, "left", image_name), np.int32(pred_disp * 100))
 
-        fig, ax = plt.subplots(1, 3, figsize=(10, 5))
-        ax[0].imshow(np.int32(top_disp[0, 0, :, :].squeeze().cpu().numpy() * 100), vmin=0.0, vmax=100.0)
-        ax[1].imshow(np.int32(pred_disp * 100), vmin=0.0, vmax=100.0)
-        ax[2].imshow(np.int32(disp * 100), vmin=0.0, vmax=100.0)
-        # ax[2].imshow(disp, vmin=0.0, vmax=100.0)
-        # print('Error rate: ', np.sum(np.abs(x[:, 100:] - corr_idx[:, 100:] - \
-        #                                     disp[:, 100:]) >= 2.0) / disp[:, 100:].shape[0] / disp[:, 100:].shape[1])
-        # print("--- %s seconds ---" % (time.time() - start_time))
-        plt.show()
+        # fig, ax = plt.subplots(1, 3, figsize=(10, 5))
+        # ax[0].imshow(np.int32(top_disp[0, 0, :, :].squeeze().cpu().numpy() * 100), vmin=0.0, vmax=100.0)
+        # ax[1].imshow(np.int32(pred_disp * 100), vmin=0.0, vmax=100.0)
+        # ax[2].imshow(np.int32(disp * 100), vmin=0.0, vmax=100.0)
+        # # ax[2].imshow(disp, vmin=0.0, vmax=100.0)
+        # # print('Error rate: ', np.sum(np.abs(x[:, 100:] - corr_idx[:, 100:] - \
+        # #                                     disp[:, 100:]) >= 2.0) / disp[:, 100:].shape[0] / disp[:, 100:].shape[1])
+        # # print("--- %s seconds ---" % (time.time() - start_time))
+        # plt.show()
 
         print("error:{}".format(error))
 

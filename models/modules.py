@@ -1,71 +1,70 @@
+import os
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
-import numpy
-import torch.nn.functional as F
-import torchvision
+import torch.utils.data
+from torchvision import models
+
+os.environ['TORCH_HOME'] = './ckpt/models'
 
 
-class Block(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super().__init__()
-        self.conv1 = nn.Conv2d(in_ch, out_ch, 3, padding=1)
+class ResEncoder(nn.Module):
+    def __init__(self, input_c=10):
+        super(ResEncoder, self).__init__()
+        resnet = models.resnet18(pretrained=True)
+
+        self.conv1 = nn.Conv2d(input_c, 64, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), bias=False)
+        self.bn1 = resnet.bn1
+        self.relu = resnet.relu
+        self.maxpool = resnet.maxpool
+
+        self.layer1 = resnet.layer1
+        self.layer2 = resnet.layer2
+        self.layer3 = resnet.layer3
+        self.layer4 = resnet.layer4
+
+    def forward(self, input_view):
+        feat0 = self.relu(self.bn1(self.conv1(input_view)))
+        x = self.maxpool(feat0)
+
+        feat1 = self.layer1(x)
+        feat2 = self.layer2(feat1)
+        feat3 = self.layer3(feat2)
+        feat4 = self.layer4(feat3)
+
+        featmap_list = [feat0, feat1, feat2, feat3, feat4]
+        return featmap_list
+
+
+class ResDecoder(nn.Module):
+    def __init__(self, output_c=1):
+        super(ResDecoder, self).__init__()
+        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear')
+        self.channel = 64
+
+        self.up_conv5 = nn.Conv2d(self.channel, self.channel, (1, 1))
+        self.up_conv4 = nn.Conv2d(self.channel, self.channel, (1, 1))
+        self.up_conv3 = nn.Conv2d(self.channel, self.channel, (1, 1))
+        self.up_conv2 = nn.Conv2d(self.channel, self.channel, (1, 1))
+        self.up_conv1 = nn.Conv2d(self.channel, self.channel, (1, 1))
+        self.up_conv0 = nn.Conv2d(self.channel, self.channel, (1, 1))
+
+        self.c5_conv = nn.Conv2d(512, self.channel, (1, 1))
+        self.c4_conv = nn.Conv2d(256, self.channel, (1, 1))
+        self.c3_conv = nn.Conv2d(128, self.channel, (1, 1))
+        self.c2_conv = nn.Conv2d(64, self.channel, (1, 1))
+        self.c1_conv = nn.Conv2d(64, self.channel, (1, 1))
+
+        self.p0_conv = nn.Conv2d(self.channel, self.channel, (3, 3), padding=1)
+        self.pred_disp = nn.Conv2d(self.channel, output_c, (1, 1), padding=0)
         self.relu = nn.ReLU()
-        self.conv2 = nn.Conv2d(out_ch, out_ch, 3, padding=1)
 
-    def forward(self, x):
-        return self.conv2(self.relu(self.conv1(x)))
-
-
-class upBlock(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super().__init__()
-        self.conv = nn.ConvTranspose2d(in_ch, out_ch, 4, 2, padding=1)
-
-    def forward(self, x):
-        return self.conv(x)
-
-
-class dnBlock(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super().__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, 3, stride=2, padding=1)
-
-    def forward(self, x):
-        return self.conv(x)
-
-
-class Encoder(nn.Module):
-    def __init__(self, chs=(3, 64, 128, 256, 512, 1024)):
-        super().__init__()
-        self.enc_blocks = nn.ModuleList([Block(chs[i], chs[i + 1]) for i in range(len(chs) - 1)])
-        self.down_blocks = nn.ModuleList([dnBlock(chs[i + 1], chs[i + 1]) for i in range(len(chs) - 1)])
-
-    def forward(self, x):
-        ftrs = []
-        for block, dnblock in zip(self.enc_blocks, self.down_blocks):
-            x = block(x)
-            ftrs.append(x)
-            x = dnblock(x)
-        return ftrs
-
-
-class Decoder(nn.Module):
-    def __init__(self, chs=(1024, 512, 256, 128, 64)):
-        super().__init__()
-        self.chs = chs
-        self.upconvs = nn.ModuleList([upBlock(chs[i], chs[i + 1]) for i in range(len(chs) - 1)])
-        self.dec_blocks = nn.ModuleList([Block(chs[i], chs[i + 1]) for i in range(len(chs) - 1)])
-
-    def forward(self, x, encoder_features):
-        for i in range(len(self.chs) - 1):
-            x = self.upconvs[i](x)
-            enc_ftrs = self.crop(encoder_features[i], x)
-            x = torch.cat([x, enc_ftrs], dim=1)
-            x = self.dec_blocks[i](x)
-        return x
-
-    def crop(self, enc_ftrs, x):
-        _, _, H, W = x.shape
-        enc_ftrs = torchvision.transforms.CenterCrop([H, W])(enc_ftrs)
-        return enc_ftrs
+    def forward(self, featmap_list):
+        [feat0, feat1, feat2, feat3, feat4] = featmap_list
+        p5 = self.relu(self.c5_conv(feat4))
+        p4 = self.up_conv5(self.upsample(p5)) + self.relu(self.c4_conv(feat3))
+        p3 = self.up_conv4(self.upsample(p4)) + self.relu(self.c3_conv(feat2))
+        p2 = self.up_conv3(self.upsample(p3)) + self.relu(self.c2_conv(feat1))
+        p1 = self.up_conv2(self.upsample(p2)) + self.relu(self.c1_conv(feat0))
+        p0 = self.relu(self.p0_conv(p1))
+        output_disp = self.pred_disp(p0)
+        return output_disp
