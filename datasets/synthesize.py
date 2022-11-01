@@ -240,3 +240,24 @@ def get_patch_corr(pattern, cam_imgs, disp, top_k, crop=False, start_h=0, start_
     # plt.show()
 
     return top_corr, top_disp, torch.from_numpy(disp[..., np.newaxis]).cuda()
+
+
+def get_patch_corr_all(pattern, cam_imgs, disp):
+    cam_imgs = cam_imgs.squeeze().permute(1, 2, 0)
+
+    resx, resy, c = cam_imgs.shape
+
+    codes = pattern[0]
+
+    code1d = torch.from_numpy(codes.astype(np.float32)).cuda()
+    code1d_bias = torch.sum(code1d ** 2, dim=1).reshape(-1, 1)
+
+    # x_np, y_np = np.meshgrid(np.arange(disp.shape[1]), np.arange(disp.shape[0]))
+
+    cam_imgs = cam_imgs.reshape(-1, c).permute(1, 0)
+
+    corr = code1d_bias - 2 * torch.matmul(code1d, cam_imgs)
+    corr = corr.reshape(-1, resx, resy).permute(1, 2, 0)
+    disp = disp[:, 100:]
+
+    return corr, disp
