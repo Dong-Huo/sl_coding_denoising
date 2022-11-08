@@ -41,7 +41,7 @@ class Training_dataset(data.Dataset):
         # else:
         #     top_corr, top_idx, disp = noisy_synthesize(img_path, self.pattern_uncode_all, top_k=self.top_k)
 
-        projector_light = 10 ** np.random.uniform(np.log10(0.3), np.log10(0.8))
+        projector_light = 10 ** np.random.uniform(np.log10(0.2), np.log10(2.0))
         poiss_K = 10 ** np.random.uniform(np.log10(2.0), np.log10(6.0))
         cam_imgs, disp = noisy_synthesize(img_path, self.pattern_golay_all, pr=projector_light, poiss_K=poiss_K)
 
