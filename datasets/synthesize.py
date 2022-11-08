@@ -162,7 +162,8 @@ def noisy_synthesize(left_path, pattern, noise_level=0.001, t_exp=1.0, pr=1.0, s
 
     rgb = imageio.imread(left_path).astype(np.float32) / 255.0
     intensity = np.mean(rgb, axis=2)
-    intensity = (intensity + 1.0) / 2.0
+#     intensity = (intensity + 1.0) / 2.0
+    intensity = np.clip(intensity, 0.2, 1.0)
     intensity = intensity[:, :resy]
 
     # cam_imgs = sl_simu(pattern, intensity, disp, pr, sr, poiss_K, noise_level, t_exp)
